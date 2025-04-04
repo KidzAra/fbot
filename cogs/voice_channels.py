@@ -246,25 +246,44 @@ class VoiceChannelControlView(View):
         view.add_item(select)
         await interaction.response.send_message("Выберите пользователя для мута:", view=view, ephemeral=True)
 
-    async def set_user_limit(self, interaction: disnake.MessageInteraction):
-        modal = Modal(
-            title="Установить лимит пользователей",
-            components=[
-                TextInput(label="Лимит пользователей", placeholder="Введите лимит", custom_id="user_limit_input")
-            ]
-        )
-        
-        async def modal_callback(interaction: disnake.ModalInteraction):
-            user_limit = int(interaction.data['values']['user_limit_input'])
-            await self.channel.edit(user_limit=user_limit)
-            await interaction.response.send_message(f"Лимит пользователей установлен на {user_limit}.", ephemeral=True)
+    async def rename_channel(self, interaction: disnake.MessageInteraction):
+        # Используем предопределенный класс модального окна
+        modal = RenameChannelModal(channel_id=self.channel.id)
+        await interaction.response.send_modal(modal)
 
-        modal.set_callback(modal_callback)
+    async def set_user_limit(self, interaction: disnake.MessageInteraction):
+        # Создаем класс модального окна на месте для более надежной работы
+        class UserLimitModal(Modal):
+            def __init__(self, channel):
+                self.channel = channel
+                components = [
+                    TextInput(
+                        label="Лимит пользователей", 
+                        placeholder="Введите лимит", 
+                        custom_id="user_limit_input",
+                        min_length=1,
+                        max_length=2
+                    )
+                ]
+                super().__init__(title="Установить лимит пользователей", components=components)
+            
+            async def callback(self, interaction: disnake.ModalInteraction):
+                user_limit = int(self.components[0].value)
+                await self.channel.edit(user_limit=user_limit)
+                await interaction.response.send_message(f"Лимит пользователей установлен на {user_limit}.", ephemeral=True)
+        
+        modal = UserLimitModal(channel=self.channel)
         await interaction.response.send_modal(modal)
 
 class VoiceChannelCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+
+    async def remove_mute(self, member):
+        try:
+            await member.edit(mute=False)
+        except Exception as e:
+            print(f"Ошибка при снятии мута с пользователя {member.display_name}: {e}")
 
     @commands.Cog.listener()
     async def on_voice_channel_empty(self, channel):
@@ -275,6 +294,12 @@ class VoiceChannelCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):
+        # Проверяем, если пользователь перешел из одного канала в другой
+        if before.channel and after.channel and before.channel != after.channel:
+            # Снимаем мут с пользователя при переходе между каналами
+            if member.voice and member.voice.mute:
+                await self.remove_mute(member)
+        
         if before.channel and before.channel.id != CREATE_VOICE_CHANNEL_ID and len(before.channel.members) == 0:
             await self.check_and_delete_channel(before.channel)
 
