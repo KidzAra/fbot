@@ -20,11 +20,20 @@ class TicketModal(Modal):
         description = interaction.text_values["description"]
         guild = interaction.guild
         category = disnake.utils.get(guild.categories, id=TICKET_CATEGORY_ID)
+        
+        # Create initial overwrites with guaranteed objects
         overwrites = {
             guild.default_role: disnake.PermissionOverwrite(read_messages=False),
             interaction.user: disnake.PermissionOverwrite(read_messages=True, send_messages=True),
-            disnake.utils.get(guild.roles, id=SUPPORT_ROLE_ID): disnake.PermissionOverwrite(read_messages=True, send_messages=True),
         }
+        
+        # Try to get the support role and add it to overwrites only if it exists
+        support_role = disnake.utils.get(guild.roles, id=SUPPORT_ROLE_ID)
+        if support_role:
+            overwrites[support_role] = disnake.PermissionOverwrite(read_messages=True, send_messages=True)
+        else:
+            print(f"Warning: Support role with ID {SUPPORT_ROLE_ID} not found!")
+            
         channel = await guild.create_text_channel(name=f"{self.ticket_type}-{self.ticket_id}", category=category, overwrites=overwrites)
         await channel.send(
             embed=disnake.Embed(description=f"Тип обращения: {self.ticket_type}\nПользователь: {interaction.user.mention}\nОписание: {description}")
@@ -40,9 +49,17 @@ class TicketControlView(View):
 
     @disnake.ui.button(label="Взять тикет", style=disnake.ButtonStyle.primary)
     async def take_ticket(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
-        if SUPPORT_ROLE_ID not in [role.id for role in interaction.user.roles]:
+        # Check if user has support role more safely
+        has_support_role = False
+        for role in interaction.user.roles:
+            if role.id == SUPPORT_ROLE_ID:
+                has_support_role = True
+                break
+        
+        if not has_support_role:
             await interaction.response.send_message("Только агенты поддержки могут брать тикеты.", ephemeral=True)
             return
+            
         overwrites = interaction.channel.overwrites
         overwrites[interaction.guild.default_role] = disnake.PermissionOverwrite(read_messages=False)
         overwrites[interaction.user] = disnake.PermissionOverwrite(read_messages=True, send_messages=True, manage_messages=True)
@@ -66,13 +83,33 @@ class ConfirmCloseView(View):
 
     @disnake.ui.button(label="Закрыть", style=disnake.ButtonStyle.danger)
     async def confirm_close(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
+        # Check if log channel exists
         log_channel = disnake.utils.get(interaction.guild.text_channels, id=LOG_CHANNEL_ID)
+        
+        # Collect messages from the ticket
         messages = [f"Тикет {self.ticket_id} закрыт {interaction.user.mention}\n"]
         async for message in self.channel.history(limit=None):
             messages.append(f"{message.author}: {message.content}")
+        
         log_content = "\n".join(messages)
-        await log_channel.send(log_content)
-        await self.channel.delete()
+        
+        # Log to the log channel if it exists
+        if log_channel:
+            try:
+                await log_channel.send(log_content)
+            except Exception as e:
+                print(f"Ошибка при отправке лога в канал логов: {e}")
+        else:
+            print(f"Log channel with ID {LOG_CHANNEL_ID} not found!")
+        
+        # Delete the ticket channel
+        try:
+            await self.channel.delete()
+        except Exception as e:
+            print(f"Ошибка при удалении канала тикета: {e}")
+            await interaction.response.send_message("Не удалось удалить канал тикета, обратитесь к администратору.", ephemeral=True)
+            return
+            
         await interaction.response.send_message("Тикет закрыт и журнал сохранен в логах.", ephemeral=True)
 
     @disnake.ui.button(label="Отмена", style=disnake.ButtonStyle.secondary)

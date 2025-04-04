@@ -68,42 +68,89 @@ class VoiceChannelControlView(View):
 
     async def block_user(self, interaction: disnake.MessageInteraction):
         members = self.channel.members
-        if not members:
-            await interaction.response.send_message("В канале нет пользователей для блокировки.", ephemeral=True)
-            return
-
-        block_select = Select(
-            placeholder="Выберите пользователя для блокировки",
-            options=[disnake.SelectOption(label=member.display_name, value=str(member.id)) for member in members[:25]]
-        )
-        unblock_select = Select(
-            placeholder="Выберите пользователя для разблокировки",
-            options=[disnake.SelectOption(label=member.display_name, value=str(member.id)) for member in self.channel.guild.members if member not in members][:25]
-        )
-
-        async def block_select_callback(interaction: disnake.MessageInteraction):
-            member_id = int(block_select.values[0])
-            member = self.channel.guild.get_member(member_id)
-            overwrites = self.channel.overwrites
-            overwrites[member] = disnake.PermissionOverwrite(connect=False)
-            await self.channel.edit(overwrites=overwrites)
-            await interaction.response.send_message(f"{member.display_name} был заблокирован в голосовом канале.", ephemeral=True)
-
-        async def unblock_select_callback(interaction: disnake.MessageInteraction):
-            member_id = int(unblock_select.values[0])
-            member = self.channel.guild.get_member(member_id)
-            overwrites = self.channel.overwrites
-            if member in overwrites:
-                del overwrites[member]
-            await self.channel.edit(overwrites=overwrites)
-            await interaction.response.send_message(f"{member.display_name} был разблокирован в голосовом канале.", ephemeral=True)
-
-        block_select.callback = block_select_callback
-        unblock_select.callback = unblock_select_callback
+        
+        # Button view for choosing between blocking and unblocking
+        block_button = Button(label="Заблокировать пользователя", style=disnake.ButtonStyle.danger)
+        unblock_button = Button(label="Разблокировать пользователя", style=disnake.ButtonStyle.success)
+        
+        async def show_block_select(interaction: disnake.MessageInteraction):
+            if not members:
+                await interaction.response.send_message("В канале нет пользователей для блокировки.", ephemeral=True)
+                return
+                
+            block_select = Select(
+                placeholder="Выберите пользователя для блокировки",
+                options=[disnake.SelectOption(label=member.display_name, value=str(member.id)) for member in members[:25]]
+            )
+            
+            async def block_select_callback(interaction: disnake.MessageInteraction):
+                member_id = int(block_select.values[0])
+                member = self.channel.guild.get_member(member_id)
+                overwrites = self.channel.overwrites
+                overwrites[member] = disnake.PermissionOverwrite(connect=False)
+                await self.channel.edit(overwrites=overwrites)
+                
+                # Kick member if they're in the channel
+                if member in self.channel.members:
+                    try:
+                        await member.move_to(None)
+                    except Exception as e:
+                        print(f"Не удалось кикнуть пользователя: {e}")
+                        
+                await interaction.response.send_message(f"{member.display_name} был заблокирован в голосовом канале.", ephemeral=True)
+            
+            block_select.callback = block_select_callback
+            view = View()
+            view.add_item(block_select)
+            await interaction.response.send_message("Выберите пользователя для блокировки:", view=view, ephemeral=True)
+        
+        async def show_unblock_select(interaction: disnake.MessageInteraction):
+            # Get all members with explicit overwrites that deny connect permission
+            banned_members = []
+            for target, overwrite in self.channel.overwrites.items():
+                if isinstance(target, disnake.Member) and overwrite.connect is False:
+                    banned_members.append(target)
+            
+            if not banned_members:
+                await interaction.response.send_message("В канале нет заблокированных пользователей.", ephemeral=True)
+                return
+                
+            unblock_select = Select(
+                placeholder="Выберите пользователя для разблокировки",
+                options=[disnake.SelectOption(label=member.display_name, value=str(member.id)) for member in banned_members[:25]]
+            )
+            
+            async def unblock_select_callback(interaction: disnake.MessageInteraction):
+                member_id = int(unblock_select.values[0])
+                member = self.channel.guild.get_member(member_id)
+                
+                # Get current overwrites and modify them
+                overwrites = self.channel.overwrites
+                if member in overwrites:
+                    # If there are other permissions, preserve them but enable connect
+                    overwrites[member].connect = None
+                    
+                    # If all permissions are None after this change, remove the overwrite entirely
+                    if all(getattr(overwrites[member], attr) is None for attr in dir(overwrites[member]) if not attr.startswith('_')):
+                        del overwrites[member]
+                
+                await self.channel.edit(overwrites=overwrites)
+                await interaction.response.send_message(f"{member.display_name} был разблокирован и теперь может войти в голосовой канал.", ephemeral=True)
+            
+            unblock_select.callback = unblock_select_callback
+            view = View()
+            view.add_item(unblock_select)
+            await interaction.response.send_message("Выберите пользователя для разблокировки:", view=view, ephemeral=True)
+        
+        # Assign callbacks to buttons
+        block_button.callback = show_block_select
+        unblock_button.callback = show_unblock_select
+        
+        # Create main view with block/unblock options
         view = View()
-        view.add_item(block_select)
-        view.add_item(unblock_select)
-        await interaction.response.send_message("Выберите пользователя для блокировки или разблокировки:", view=view, ephemeral=True)
+        view.add_item(block_button)
+        view.add_item(unblock_button)
+        await interaction.response.send_message("Выберите действие:", view=view, ephemeral=True)
 
     async def manage_access(self, interaction: disnake.MessageInteraction):
         add_moderator_button = Button(label="Добавить модератора", style=disnake.ButtonStyle.primary)
