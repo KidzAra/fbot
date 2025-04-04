@@ -10,7 +10,7 @@ class RenameChannelModal(Modal):
         super().__init__(title="Переименовать канал", components=components)
     
     async def callback(self, interaction: disnake.ModalInteraction):
-        new_name = self.components[0].value
+        new_name = interaction.text_values["channel_name_input"]
         channel = interaction.guild.get_channel(self.channel_id)
         if channel:
             try:
@@ -268,7 +268,7 @@ class VoiceChannelControlView(View):
                 super().__init__(title="Установить лимит пользователей", components=components)
             
             async def callback(self, interaction: disnake.ModalInteraction):
-                user_limit = int(self.components[0].value)
+                user_limit = int(interaction.text_values["user_limit_input"])
                 await self.channel.edit(user_limit=user_limit)
                 await interaction.response.send_message(f"Лимит пользователей установлен на {user_limit}.", ephemeral=True)
         
@@ -300,29 +300,50 @@ class VoiceChannelCog(commands.Cog):
             if member.voice and member.voice.mute:
                 await self.remove_mute(member)
         
-        if before.channel and before.channel.id != CREATE_VOICE_CHANNEL_ID and len(before.channel.members) == 0:
-            await self.check_and_delete_channel(before.channel)
+        # Проверяем, если канал пуст и нужно его удалить
+        if before.channel:
+            try:
+                # Проверяем, что канал все еще существует и пуст
+                channel = self.bot.get_channel(before.channel.id)
+                if channel and channel.id != CREATE_VOICE_CHANNEL_ID and channel.category_id == CATEGORY_ID and len(channel.members) == 0:
+                    await self.check_and_delete_channel(channel)
+            except Exception as e:
+                print(f"Ошибка при проверке/удалении канала: {e}")
 
+        # Создаем новый канал, если пользователь зашел в канал создания
         if after.channel and after.channel.id == CREATE_VOICE_CHANNEL_ID:
-            category = self.bot.get_channel(CATEGORY_ID)
-            new_channel = await category.create_voice_channel(name=f"Канал {member.display_name}", user_limit=10)
-            await member.move_to(new_channel)
-            view = VoiceChannelControlView(new_channel)
+            try:
+                category = self.bot.get_channel(CATEGORY_ID)
+                new_channel = await category.create_voice_channel(name=f"Канал {member.display_name}", user_limit=10)
+                await member.move_to(new_channel)
+                view = VoiceChannelControlView(new_channel)
 
-            embed = disnake.Embed(
-                title="Настройки управления каналом",
-                description=""
-            )
-            embed.set_image(url="https://images-ext-1.discordapp.net/external/ifMuRBC67wdmv3qNn27a2WkBob8C6AuaqQyIr3nKMGg/https/message.style/cdn/images/20ad00844f868764e02ebe7d966414c0cb9c4d3f4723a384c2f1a18c148fc360.png?format=webp&quality=lossless")
+                embed = disnake.Embed(
+                    title="Настройки управления каналом",
+                    description=""
+                )
+                embed.set_image(url="https://images-ext-1.discordapp.net/external/ifMuRBC67wdmv3qNn27a2WkBob8C6AuaqQyIr3nKMGg/https/message.style/cdn/images/20ad00844f868764e02ebe7d966414c0cb9c4d3f4723a384c2f1a18c148fc360.png?format=webp&quality=lossless")
 
-            control_message = await new_channel.send(embed=embed, view=view)
-            view.message = control_message
+                control_message = await new_channel.send(embed=embed, view=view)
+                view.message = control_message
+            except Exception as e:
+                print(f"Ошибка при создании нового канала: {e}")
 
     async def check_and_delete_channel(self, channel):
-        if channel.category_id == CATEGORY_ID and channel.id != CREATE_VOICE_CHANNEL_ID and len(channel.members) == 0:
+        if channel and channel.category_id == CATEGORY_ID and channel.id != CREATE_VOICE_CHANNEL_ID and len(channel.members) == 0:
+            # Unmute members before deletion (even though there shouldn't be any)
             for member in channel.members:
                 await self.remove_mute(member)
-            await channel.delete()
+            
+            # Safely delete channel with error handling
+            try:
+                await channel.delete()
+            except disnake.errors.NotFound:
+                # Channel already deleted or not found, just log and continue
+                print(f"Канал {channel.id} не найден при попытке удаления.")
+            except Exception as e:
+                # Handle any other exceptions
+                print(f"Ошибка при удалении канала {channel.id}: {e}")
 
     @commands.Cog.listener()
     async def on_interaction(self, interaction: disnake.MessageInteraction):
