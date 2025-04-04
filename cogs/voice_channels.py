@@ -326,7 +326,11 @@ class VoiceChannelCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_interaction(self, interaction: disnake.MessageInteraction):
-        if interaction.data['custom_id'] in [
+        if not hasattr(interaction, 'data') or not interaction.data.get('custom_id'):
+            return
+            
+        custom_id = interaction.data.get('custom_id')
+        if custom_id in [
             "kick_user", "block_user", "manage_access", "visibility_settings", 
             "set_bitrate_and_region", "mute_user", "rename_channel", "set_user_limit"
         ]:
@@ -335,8 +339,14 @@ class VoiceChannelCog(commands.Cog):
             if not channel:
                 await interaction.response.send_message("Канал не найден.", ephemeral=True)
                 return
+                
             view = VoiceChannelControlView(channel)
-            await getattr(view, interaction.data['custom_id'])(interaction)
+            method = getattr(view, custom_id, None)
+            if method:
+                await method(interaction)
+            else:
+                print(f"Метод {custom_id} не найден в VoiceChannelControlView")
+                await interaction.response.send_message("Эта функция находится в разработке.", ephemeral=True)
 
 def setup(bot):
     bot.add_cog(VoiceChannelCog(bot))
