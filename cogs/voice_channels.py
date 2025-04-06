@@ -29,7 +29,7 @@ class VoiceChannelControlView(View):
         self.channel = channel
 
         # First row
-        self.add_item(Button(label="", emoji="<:kick:1259914803632144489>", style=disnake.ButtonStyle.secondary, custom_id="kick_user"))
+        self.add_item(Button(label="", emoji="", style=disnake.ButtonStyle.secondary, custom_id="set_user_limit")) 
         self.add_item(Button(label="", emoji="<:ban:1259916123009192096>", style=disnake.ButtonStyle.secondary, custom_id="block_user"))
         self.add_item(Button(label="", emoji="<:acess:1259919174214353058>", style=disnake.ButtonStyle.secondary, custom_id="manage_access"))
         self.add_item(Button(label="", emoji="<:visibilyty:1259923937861828648>", style=disnake.ButtonStyle.secondary, custom_id="visibility_settings"))
@@ -40,7 +40,6 @@ class VoiceChannelControlView(View):
         self.add_item(Button(label="", emoji="<:name:1261313988705390653>", style=disnake.ButtonStyle.secondary, custom_id="rename_channel"))
         self.add_item(Button(label="", emoji="<:beta:1259923495375343679>", style=disnake.ButtonStyle.secondary, custom_id="beta_button", disabled=True))
 
-        self.add_item(Button(label="", emoji="🔢", style=disnake.ButtonStyle.secondary, custom_id="set_user_limit"))  # Новая кнопка для установки лимита пользователей
 
     async def interaction_check(self, interaction: disnake.Interaction):
         return interaction.user == self.channel.guild.owner
@@ -86,18 +85,21 @@ class VoiceChannelControlView(View):
             async def block_select_callback(interaction: disnake.MessageInteraction):
                 member_id = int(block_select.values[0])
                 member = self.channel.guild.get_member(member_id)
-                overwrites = self.channel.overwrites
-                overwrites[member] = disnake.PermissionOverwrite(connect=False)
-                await self.channel.edit(overwrites=overwrites)
                 
-                # Kick member if they're in the channel
-                if member in self.channel.members:
-                    try:
+                try:
+                    # Сначала исключаем пользователя из голосового канала
+                    if member in self.channel.members:
                         await member.move_to(None)
-                    except Exception as e:
-                        print(f"Не удалось кикнуть пользователя: {e}")
-                        
-                await interaction.response.send_message(f"{member.display_name} был заблокирован в голосовом канале.", ephemeral=True)
+                    
+                    # Затем обновляем права доступа
+                    overwrites = self.channel.overwrites
+                    overwrites[member] = disnake.PermissionOverwrite(connect=False)
+                    await self.channel.edit(overwrites=overwrites)
+                    
+                    await interaction.response.send_message(f"{member.display_name} был заблокирован в голосовом канале.", ephemeral=True)
+                except Exception as e:
+                    print(f"Ошибка при блокировке пользователя {member.display_name}: {e}")
+                    await interaction.response.send_message(f"Произошла ошибка при блокировке пользователя: {str(e)}", ephemeral=True)
             
             block_select.callback = block_select_callback
             view = View()
@@ -105,19 +107,45 @@ class VoiceChannelControlView(View):
             await interaction.response.send_message("Выберите пользователя для блокировки:", view=view, ephemeral=True)
         
         async def show_unblock_select(interaction: disnake.MessageInteraction):
-            # Get all members with explicit overwrites that deny connect permission
+            # Получаем всех пользователей сервера, у которых есть индивидуальные разрешения для канала
             banned_members = []
-            for target, overwrite in self.channel.overwrites.items():
-                if isinstance(target, disnake.Member) and overwrite.connect is False:
-                    banned_members.append(target)
             
+            # Проверяем все переопределения разрешений канала
+            for target, overwrite in self.channel.overwrites.items():
+                # Проверяем, что это пользователь (а не роль) и что у него запрещено подключение
+                if isinstance(target, disnake.Member):
+                    # Проверяем значение connect (False = запрещено)
+                    if overwrite.connect is False:
+                        banned_members.append(target)
+            
+            # Если список пуст, сообщаем об этом
             if not banned_members:
-                await interaction.response.send_message("В канале нет заблокированных пользователей.", ephemeral=True)
+                # Дополнительно проверяем, есть ли в канале переопределения разрешений
+                if not self.channel.overwrites:
+                    await interaction.response.send_message("В канале нет переопределений разрешений.", ephemeral=True)
+                else:
+                    await interaction.response.send_message("В канале нет заблокированных пользователей.", ephemeral=True)
+                return
+            
+            # Создаем список опций для выпадающего списка
+            options = []
+            for member in banned_members[:25]:  # Ограничиваем до 25 пользователей из-за ограничений Discord
+                option = disnake.SelectOption(
+                    label=member.display_name,
+                    value=str(member.id),
+                    description=f"ID: {member.id}"
+                )
+                options.append(option)
+            
+            # Если список опций пуст, сообщаем об этом
+            if not options:
+                await interaction.response.send_message("Не удалось создать список заблокированных пользователей.", ephemeral=True)
                 return
                 
+            # Создаем выпадающий список
             unblock_select = Select(
                 placeholder="Выберите пользователя для разблокировки",
-                options=[disnake.SelectOption(label=member.display_name, value=str(member.id)) for member in banned_members[:25]]
+                options=options
             )
             
             async def unblock_select_callback(interaction: disnake.MessageInteraction):
