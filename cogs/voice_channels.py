@@ -29,16 +29,16 @@ class VoiceChannelControlView(View):
         self.channel = channel
 
         # First row
-        self.add_item(Button(label="", emoji="", style=disnake.ButtonStyle.secondary, custom_id="set_user_limit")) 
-        self.add_item(Button(label="", emoji="<:ban:1259916123009192096>", style=disnake.ButtonStyle.secondary, custom_id="block_user"))
-        self.add_item(Button(label="", emoji="<:acess:1259919174214353058>", style=disnake.ButtonStyle.secondary, custom_id="manage_access"))
-        self.add_item(Button(label="", emoji="<:visibilyty:1259923937861828648>", style=disnake.ButtonStyle.secondary, custom_id="visibility_settings"))
+        self.add_item(Button(label="", emoji="<:limit:1357828278970351698>", style=disnake.ButtonStyle.secondary, custom_id="set_user_limit")) 
+        self.add_item(Button(label="", emoji="<:ban:1357828274868322475>", style=disnake.ButtonStyle.secondary, custom_id="block_user"))
+        self.add_item(Button(label="", emoji="<:access:1357828276969799831>", style=disnake.ButtonStyle.secondary, custom_id="manage_access"))
+        self.add_item(Button(label="", emoji="<:visib:1357828280425644114>", style=disnake.ButtonStyle.secondary, custom_id="visibility_settings"))
 
         # Second row
-        self.add_item(Button(label="", emoji="<:bitrate:1259922172009254973>", style=disnake.ButtonStyle.secondary, custom_id="set_bitrate_and_region"))
-        self.add_item(Button(label="", emoji="<:mutim:1259922756657483801>", style=disnake.ButtonStyle.secondary, custom_id="mute_user"))
-        self.add_item(Button(label="", emoji="<:name:1261313988705390653>", style=disnake.ButtonStyle.secondary, custom_id="rename_channel"))
-        self.add_item(Button(label="", emoji="<:beta:1259923495375343679>", style=disnake.ButtonStyle.secondary, custom_id="beta_button", disabled=True))
+        self.add_item(Button(label="", emoji="<:bitrate:1357828282979979273>", style=disnake.ButtonStyle.secondary, custom_id="set_bitrate_and_region"))
+        self.add_item(Button(label="", emoji="<:mute:1357828284804628641>", style=disnake.ButtonStyle.secondary, custom_id="mute_user"))
+        self.add_item(Button(label="", emoji="<:name:1357828288256413866>", style=disnake.ButtonStyle.secondary, custom_id="rename_channel"))
+        self.add_item(Button(label="", emoji="<:beta:1357828286394138795>", style=disnake.ButtonStyle.secondary, custom_id="beta_button", disabled=True))
 
 
     async def interaction_check(self, interaction: disnake.Interaction):
