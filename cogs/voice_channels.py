@@ -423,21 +423,121 @@ class VoiceChannelControlView(View):
         await interaction.response.send_message("Выберите битрейт и регион канала:", view=view, ephemeral=True)
 
     async def mute_user(self, interaction: disnake.MessageInteraction):
-        select = Select(
-            placeholder="Выберите пользователя для мута",
-            options=[disnake.SelectOption(label=member.display_name, value=str(member.id)) for member in self.channel.members]
-        )
+        # Создаем кнопки для мута и размута
+        mute_button = Button(label="Замутить пользователя", style=disnake.ButtonStyle.danger)
+        unmute_button = Button(label="Размутить пользователя", style=disnake.ButtonStyle.success)
 
-        async def select_callback(interaction: disnake.MessageInteraction):
-            member_id = int(select.values[0])
-            member = self.channel.guild.get_member(member_id)
-            await member.edit(mute=True)
-            await interaction.response.send_message(f"{member.display_name} был замучен в голосовом канале.", ephemeral=True)
+        async def show_mute_select(interaction: disnake.MessageInteraction):
+            # Получаем список немых пользователей
+            muted_members = [m for m in self.channel.members if m.voice and m.voice.mute]
+            # Получаем список немых пользователей
+            unmuted_members = [m for m in self.channel.members if m.voice and not m.voice.mute]
 
-        select.callback = select_callback
+            if not unmuted_members:
+                await interaction.response.send_message(
+                    "В канале нет пользователей, которых можно замутить.",
+                    ephemeral=True
+                )
+                return
+
+            mute_select = Select(
+                placeholder="Выберите пользователя для мута",
+                options=[
+                    disnake.SelectOption(
+                        label=member.display_name,
+                        value=str(member.id),
+                        description=f"ID: {member.id}"
+                    ) for member in unmuted_members[:25]  # Discord limit
+                ]
+            )
+
+            async def mute_select_callback(interaction: disnake.MessageInteraction):
+                member_id = int(mute_select.values[0])
+                member = self.channel.guild.get_member(member_id)
+                
+                try:
+                    await member.edit(mute=True)
+                    await interaction.response.send_message(
+                        f"{member.display_name} был замучен в голосовом канале.",
+                        ephemeral=True
+                    )
+                except Exception as e:
+                    print(f"Ошибка при муте пользователя {member.display_name}: {e}")
+                    await interaction.response.send_message(
+                        f"Произошла ошибка при муте пользователя: {str(e)}",
+                        ephemeral=True
+                    )
+
+            mute_select.callback = mute_select_callback
+            view = View()
+            view.add_item(mute_select)
+            await interaction.response.send_message(
+                "Выберите пользователя для мута:",
+                view=view,
+                ephemeral=True
+            )
+
+        async def show_unmute_select(interaction: disnake.MessageInteraction):
+            # Получаем список немых пользователей
+            muted_members = [m for m in self.channel.members if m.voice and m.voice.mute]
+
+            if not muted_members:
+                await interaction.response.send_message(
+                    "В канале нет замученных пользователей.",
+                    ephemeral=True
+                )
+                return
+
+            unmute_select = Select(
+                placeholder="Выберите пользователя для размута",
+                options=[
+                    disnake.SelectOption(
+                        label=member.display_name,
+                        value=str(member.id),
+                        description=f"ID: {member.id}"
+                    ) for member in muted_members[:25]  # Discord limit
+                ]
+            )
+
+            async def unmute_select_callback(interaction: disnake.MessageInteraction):
+                member_id = int(unmute_select.values[0])
+                member = self.channel.guild.get_member(member_id)
+                
+                try:
+                    await member.edit(mute=False)
+                    await interaction.response.send_message(
+                        f"{member.display_name} был размучен в голосовом канале.",
+                        ephemeral=True
+                    )
+                except Exception as e:
+                    print(f"Ошибка при размуте пользователя {member.display_name}: {e}")
+                    await interaction.response.send_message(
+                        f"Произошла ошибка при размуте пользователя: {str(e)}",
+                        ephemeral=True
+                    )
+
+            unmute_select.callback = unmute_select_callback
+            view = View()
+            view.add_item(unmute_select)
+            await interaction.response.send_message(
+                "Выберите пользователя для размута:",
+                view=view,
+                ephemeral=True
+            )
+
+        # Назначаем обработчики для кнопок
+        mute_button.callback = show_mute_select
+        unmute_button.callback = show_unmute_select
+
+        # Создаем основное меню с кнопками
         view = View()
-        view.add_item(select)
-        await interaction.response.send_message("Выберите пользователя для мута:", view=view, ephemeral=True)
+        view.add_item(mute_button)
+        view.add_item(unmute_button)
+        await interaction.response.send_message(
+            "Выберите действие:",
+            view=view,
+            ephemeral=True
+        )
 
     async def rename_channel(self, interaction: disnake.MessageInteraction):
         # Используем предопределенный класс модального окна
