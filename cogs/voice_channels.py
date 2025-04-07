@@ -41,41 +41,64 @@ class VoiceChannelControlView(View):
         self.add_item(Button(label="", emoji="<:beta:1357828286394138795>", style=disnake.ButtonStyle.secondary, custom_id="beta_button", disabled=True))
 
     async def interaction_check(self, interaction: disnake.Interaction) -> bool:
-        # Get the user's permissions for this channel
-        permissions = self.channel.permissions_for(interaction.user)
-        
-        # Check if user is the channel owner (has manage_channels permission in overwrites)
-        is_channel_owner = False
-        if interaction.user in self.channel.overwrites:
-            is_channel_owner = self.channel.overwrites[interaction.user].manage_channels is True
-            
-        # Define which commands require elevated permissions
-        elevated_commands = [
-            "manage_access",  # Only channel owner
-            "visibility_settings",  # Only channel owner
-            "set_bitrate_and_region",  # Only channel owner
-            "rename_channel",  # Only channel owner
-            "set_user_limit",  # Only channel owner
-        ]
-        
-        moderate_commands = [
-            "block_user",  # Requires channel owner or moderator
-            "mute_user",  # Requires channel owner or moderator
-        ]
-        
-        # Get the custom_id from the interaction
+        # Получаем cog для проверки прав
+        cog = interaction.bot.get_cog('VoiceChannelCog')
+        if not cog:
+            await interaction.response.send_message(
+                "Произошла ошибка при проверке прав доступа.", 
+                ephemeral=True
+            )
+            return False
+
+        # Проверяем, что взаимодействие происходит в правильном канале
+        if interaction.channel_id != self.channel.id:
+            await interaction.response.send_message(
+                "Вы не можете управлять этим каналом из другого канала.", 
+                ephemeral=True
+            )
+            return False
+
+        # Проверяем права пользователя для этого конкретного канала
+        is_owner = cog.is_channel_owner(self.channel.id, interaction.user.id)
+        is_moderator = cog.is_channel_moderator(self.channel.id, interaction.user.id)
+
+        # Получаем custom_id из interaction data
         custom_id = interaction.data.get("custom_id") if hasattr(interaction, "data") else None
         
-        # If it's an elevated command, only allow channel owner
-        if custom_id in elevated_commands and not is_channel_owner:
-            await interaction.response.send_message("Только владелец канала может использовать эту команду.", ephemeral=True)
-            return False
-            
-        # If it's a moderate command, require channel owner or moderator permission
-        if custom_id in moderate_commands and not (is_channel_owner or permissions.manage_channels):
-            await interaction.response.send_message("У вас нет прав на использование этой команды.", ephemeral=True)
-            return False
-            
+        # Команды, требующие прав владельца
+        owner_commands = {
+            "manage_access",  # Управление доступом
+            "visibility_settings",  # Настройки видимости
+            "set_bitrate_and_region",  # Настройка битрейта и региона
+            "rename_channel",  # Переименование канала
+            "set_user_limit"  # Установка лимита пользователей
+        }
+        
+        # Команды, доступные модераторам и владельцу
+        mod_commands = {
+            "block_user",  # Блокировка пользователей
+            "mute_user",  # Мут пользователей
+            "kick_user"  # Кик пользователей
+        }
+
+        # Проверяем права для команд владельца
+        if custom_id in owner_commands:
+            if not is_owner:
+                await interaction.response.send_message(
+                    "Эта команда доступна только владельцу канала.", 
+                    ephemeral=True
+                )
+                return False
+        
+        # Проверяем права для команд модератора
+        elif custom_id in mod_commands:
+            if not (is_owner or is_moderator):
+                await interaction.response.send_message(
+                    "Эта команда доступна только владельцу канала и модераторам.", 
+                    ephemeral=True
+                )
+                return False
+
         return True
 
     async def on_timeout(self):
@@ -219,43 +242,107 @@ class VoiceChannelControlView(View):
         transfer_ownership_button = Button(label="Передать канал", style=disnake.ButtonStyle.primary, custom_id="transfer_ownership")
 
         async def add_moderator_callback(interaction: disnake.MessageInteraction):
+            # Получаем список пользователей, исключая текущего владельца
+            cog = interaction.bot.get_cog('VoiceChannelCog')
+            current_moderators = cog.channel_moderators.get(self.channel.id, set())
+            
+            # Создаем список опций, исключая текущих модераторов и владельца
+            options = []
+            for member in self.channel.guild.members:
+                if (member != interaction.user and 
+                    member.id != cog.channel_owners.get(self.channel.id) and
+                    member.id not in current_moderators):
+                    options.append(
+                        disnake.SelectOption(
+                            label=member.display_name,
+                            value=str(member.id),
+                            description=f"ID: {member.id}"
+                        )
+                    )
+
+            if not options:
+                await interaction.response.send_message(
+                    "Нет доступных пользователей для назначения модератором.",
+                    ephemeral=True
+                )
+                return
+
             select = Select(
                 placeholder="Выберите пользователя для добавления модератора",
-                options=[disnake.SelectOption(label=member.display_name, value=str(member.id)) for member in self.channel.guild.members if member != interaction.user]
+                options=options[:25]  # Discord limit
             )
 
             async def select_callback(interaction: disnake.MessageInteraction):
                 member_id = int(select.values[0])
                 member = self.channel.guild.get_member(member_id)
-                overwrites = self.channel.overwrites
-                overwrites[member] = disnake.PermissionOverwrite(connect=True, manage_channels=True)
-                await self.channel.edit(overwrites=overwrites)
-                await interaction.response.send_message(f"{member.display_name} был добавлен как модератор канала.", ephemeral=True)
+                
+                # Добавляем модератора через cog
+                cog.add_channel_moderator(self.channel.id, member_id)
+                
+                await interaction.response.send_message(
+                    f"{member.display_name} был добавлен как модератор канала.",
+                    ephemeral=True
+                )
 
             select.callback = select_callback
             view = View()
             view.add_item(select)
-            await interaction.response.send_message("Выберите пользователя для добавления модератора:", view=view, ephemeral=True)
+            await interaction.response.send_message(
+                "Выберите пользователя для добавления модератора:",
+                view=view,
+                ephemeral=True
+            )
 
         async def transfer_ownership_callback(interaction: disnake.MessageInteraction):
+            # Получаем список пользователей, исключая текущего владельца
+            cog = interaction.bot.get_cog('VoiceChannelCog')
+            options = []
+            for member in self.channel.guild.members:
+                if member != interaction.user:
+                    options.append(
+                        disnake.SelectOption(
+                            label=member.display_name,
+                            value=str(member.id),
+                            description=f"ID: {member.id}"
+                        )
+                    )
+
+            if not options:
+                await interaction.response.send_message(
+                    "Нет доступных пользователей для передачи канала.",
+                    ephemeral=True
+                )
+                return
+
             select = Select(
                 placeholder="Выберите пользователя для передачи канала",
-                options=[disnake.SelectOption(label=member.display_name, value=str(member.id)) for member in self.channel.guild.members if member != interaction.user]
+                options=options[:25]  # Discord limit
             )
 
             async def select_callback(interaction: disnake.MessageInteraction):
                 member_id = int(select.values[0])
                 member = self.channel.guild.get_member(member_id)
-                overwrites = self.channel.overwrites
-                overwrites[interaction.user] = disnake.PermissionOverwrite(connect=True)
-                overwrites[member] = disnake.PermissionOverwrite(connect=True, manage_channels=True)
-                await self.channel.edit(overwrites=overwrites)
-                await interaction.response.send_message(f"Канал был передан {member.display_name}.", ephemeral=True)
+                
+                # Обновляем владельца канала
+                old_owner_id = cog.channel_owners[self.channel.id]
+                cog.channel_owners[self.channel.id] = member_id
+                
+                # Добавляем старого владельца как модератора
+                cog.add_channel_moderator(self.channel.id, old_owner_id)
+                
+                await interaction.response.send_message(
+                    f"Канал был передан {member.display_name}. Вы остаетесь модератором канала.",
+                    ephemeral=True
+                )
 
             select.callback = select_callback
             view = View()
             view.add_item(select)
-            await interaction.response.send_message("Выберите пользователя для передачи канала:", view=view, ephemeral=True)
+            await interaction.response.send_message(
+                "Выберите пользователя для передачи канала:",
+                view=view,
+                ephemeral=True
+            )
 
         add_moderator_button.callback = add_moderator_callback
         transfer_ownership_button.callback = transfer_ownership_callback
@@ -384,6 +471,10 @@ class VoiceChannelControlView(View):
 class VoiceChannelCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        # Словарь для хранения владельцев каналов: {channel_id: owner_id}
+        self.channel_owners = {}
+        # Словарь для хранения модераторов каналов: {channel_id: set(moderator_ids)}
+        self.channel_moderators = {}
 
     async def remove_mute(self, member):
         try:
@@ -396,6 +487,11 @@ class VoiceChannelCog(commands.Cog):
         if channel.category_id == CATEGORY_ID and channel.id != CREATE_VOICE_CHANNEL_ID and len(channel.members) == 0:
             for member in channel.members:
                 await self.remove_mute(member)
+            # Очищаем информацию о владельце и модераторах при удалении канала
+            if channel.id in self.channel_owners:
+                del self.channel_owners[channel.id]
+            if channel.id in self.channel_moderators:
+                del self.channel_moderators[channel.id]
             await channel.delete()
 
     @commands.Cog.listener()
@@ -420,7 +516,16 @@ class VoiceChannelCog(commands.Cog):
         if after.channel and after.channel.id == CREATE_VOICE_CHANNEL_ID:
             try:
                 category = self.bot.get_channel(CATEGORY_ID)
-                new_channel = await category.create_voice_channel(name=f"Канал {member.display_name}", user_limit=10)
+                new_channel = await category.create_voice_channel(
+                    name=f"Канал {member.display_name}",
+                    user_limit=10
+                )
+                
+                # Сохраняем владельца канала
+                self.channel_owners[new_channel.id] = member.id
+                # Инициализируем пустой список модераторов
+                self.channel_moderators[new_channel.id] = set()
+                
                 await member.move_to(new_channel)
                 view = VoiceChannelControlView(new_channel)
 
@@ -437,19 +542,41 @@ class VoiceChannelCog(commands.Cog):
 
     async def check_and_delete_channel(self, channel):
         if channel and channel.category_id == CATEGORY_ID and channel.id != CREATE_VOICE_CHANNEL_ID and len(channel.members) == 0:
+            # Очищаем информацию о владельце и модераторах
+            if channel.id in self.channel_owners:
+                del self.channel_owners[channel.id]
+            if channel.id in self.channel_moderators:
+                del self.channel_moderators[channel.id]
+            
             # Unmute members before deletion (even though there shouldn't be any)
             for member in channel.members:
                 await self.remove_mute(member)
             
-            # Safely delete channel with error handling
             try:
                 await channel.delete()
             except disnake.errors.NotFound:
-                # Channel already deleted or not found, just log and continue
                 print(f"Канал {channel.id} не найден при попытке удаления.")
             except Exception as e:
-                # Handle any other exceptions
                 print(f"Ошибка при удалении канала {channel.id}: {e}")
+
+    def is_channel_owner(self, channel_id: int, user_id: int) -> bool:
+        """Проверяет, является ли пользователь владельцем канала"""
+        return self.channel_owners.get(channel_id) == user_id
+
+    def is_channel_moderator(self, channel_id: int, user_id: int) -> bool:
+        """Проверяет, является ли пользователь модератором канала"""
+        return user_id in self.channel_moderators.get(channel_id, set())
+
+    def add_channel_moderator(self, channel_id: int, user_id: int):
+        """Добавляет модератора в канал"""
+        if channel_id not in self.channel_moderators:
+            self.channel_moderators[channel_id] = set()
+        self.channel_moderators[channel_id].add(user_id)
+
+    def remove_channel_moderator(self, channel_id: int, user_id: int):
+        """Удаляет модератора из канала"""
+        if channel_id in self.channel_moderators:
+            self.channel_moderators[channel_id].discard(user_id)
 
     @commands.Cog.listener()
     async def on_interaction(self, interaction: disnake.MessageInteraction):
