@@ -40,9 +40,43 @@ class VoiceChannelControlView(View):
         self.add_item(Button(label="", emoji="<:name:1357828288256413866>", style=disnake.ButtonStyle.secondary, custom_id="rename_channel"))
         self.add_item(Button(label="", emoji="<:beta:1357828286394138795>", style=disnake.ButtonStyle.secondary, custom_id="beta_button", disabled=True))
 
-
-    async def interaction_check(self, interaction: disnake.Interaction):
-        return interaction.user == self.channel.guild.owner
+    async def interaction_check(self, interaction: disnake.Interaction) -> bool:
+        # Get the user's permissions for this channel
+        permissions = self.channel.permissions_for(interaction.user)
+        
+        # Check if user is the channel owner (has manage_channels permission in overwrites)
+        is_channel_owner = False
+        if interaction.user in self.channel.overwrites:
+            is_channel_owner = self.channel.overwrites[interaction.user].manage_channels is True
+            
+        # Define which commands require elevated permissions
+        elevated_commands = [
+            "manage_access",  # Only channel owner
+            "visibility_settings",  # Only channel owner
+            "set_bitrate_and_region",  # Only channel owner
+            "rename_channel",  # Only channel owner
+            "set_user_limit",  # Only channel owner
+        ]
+        
+        moderate_commands = [
+            "block_user",  # Requires channel owner or moderator
+            "mute_user",  # Requires channel owner or moderator
+        ]
+        
+        # Get the custom_id from the interaction
+        custom_id = interaction.data.get("custom_id") if hasattr(interaction, "data") else None
+        
+        # If it's an elevated command, only allow channel owner
+        if custom_id in elevated_commands and not is_channel_owner:
+            await interaction.response.send_message("Только владелец канала может использовать эту команду.", ephemeral=True)
+            return False
+            
+        # If it's a moderate command, require channel owner or moderator permission
+        if custom_id in moderate_commands and not (is_channel_owner or permissions.manage_channels):
+            await interaction.response.send_message("У вас нет прав на использование этой команды.", ephemeral=True)
+            return False
+            
+        return True
 
     async def on_timeout(self):
         if self.message:
