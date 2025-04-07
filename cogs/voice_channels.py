@@ -261,21 +261,18 @@ class VoiceChannelControlView(View):
 
     async def set_bitrate_and_region(self, interaction: disnake.MessageInteraction):
         bitrate_options = [
-            disnake.SelectOption(label="64 Kbps", value="64000"),
-            disnake.SelectOption(label="96 Kbps", value="96000"),
-            disnake.SelectOption(label="128 Kbps", value="128000"),
-            disnake.SelectOption(label="256 Kbps", value="256000"),
-            disnake.SelectOption(label="384 Kbps", value="384000"),
-            disnake.SelectOption(label="512 Kbps", value="512000"),
-            disnake.SelectOption(label="768 Kbps", value="768000"),
+            disnake.SelectOption(label="64 Kbps(пониженный трафик)", value="64000"),
+            disnake.SelectOption(label="96 Kbps(стандарт)", value="96000"),
+            disnake.SelectOption(label="128 Kbps(1 уровень буста)", value="128000"),
+            disnake.SelectOption(label="256 Kbps(2 уровень буста)", value="256000"),
+            disnake.SelectOption(label="384 Kbps(3 уровень буста)", value="384000"),
         ]
         region_options = [
-            disnake.SelectOption(label="Авто", value="auto"),
+            disnake.SelectOption(label="Автоматический", value="auto"),
             disnake.SelectOption(label="Бразилия", value="brazil"),
             disnake.SelectOption(label="Гонконг", value="hongkong"),
             disnake.SelectOption(label="Индия", value="india"),
             disnake.SelectOption(label="Япония", value="japan"),
-            disnake.SelectOption(label="Русский", value="russia"),
             disnake.SelectOption(label="Сингапур", value="singapore"),
             disnake.SelectOption(label="Южная Африка", value="southafrica"),
             disnake.SelectOption(label="США Восток", value="us-east"),
