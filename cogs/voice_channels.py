@@ -28,17 +28,16 @@ class VoiceChannelControlView(View):
         super().__init__(timeout=None)
         self.channel = channel
 
-        # First row
+        # First row - 4 buttons
         self.add_item(Button(label="", emoji="<:limit:1357828278970351698>", style=disnake.ButtonStyle.secondary, custom_id="set_user_limit")) 
         self.add_item(Button(label="", emoji="<:ban:1357828274868322475>", style=disnake.ButtonStyle.secondary, custom_id="block_user"))
         self.add_item(Button(label="", emoji="<:access:1357828276969799831>", style=disnake.ButtonStyle.secondary, custom_id="manage_access"))
         self.add_item(Button(label="", emoji="<:visib:1357828280425644114>", style=disnake.ButtonStyle.secondary, custom_id="visibility_settings"))
 
-        # Second row
+        # Second row - 3 buttons
         self.add_item(Button(label="", emoji="<:bitrate:1357828282979979273>", style=disnake.ButtonStyle.secondary, custom_id="set_bitrate_and_region"))
         self.add_item(Button(label="", emoji="<:mute:1357828284804628641>", style=disnake.ButtonStyle.secondary, custom_id="mute_user"))
         self.add_item(Button(label="", emoji="<:name:1357828288256413866>", style=disnake.ButtonStyle.secondary, custom_id="rename_channel"))
-        self.add_item(Button(label="", emoji="<:beta:1357828286394138795>", style=disnake.ButtonStyle.secondary, custom_id="beta_button", disabled=True))
 
     async def interaction_check(self, interaction: disnake.Interaction) -> bool:
         # Получаем cog для проверки прав
