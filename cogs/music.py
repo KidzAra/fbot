@@ -39,23 +39,44 @@ class Song:
         
         try:
             with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
-                info = await loop.run_in_executor(None, lambda: ydl.extract_info(search, download=False))
-                
-                if 'entries' in info:
-                    # Берем первый результат из плейлиста
-                    info = info['entries'][0]
+                try:
+                    info = await loop.run_in_executor(None, lambda: ydl.extract_info(search, download=False))
                     
-                title = info['title']
-                url = info['webpage_url']
-                source = info['url']
-                
-                # Форматируем длительность в минутах:секундах
-                duration_seconds = info.get('duration', 0)
-                minutes, seconds = divmod(duration_seconds, 60)
-                duration = f"{minutes}:{seconds:02d}"
-                
-                return cls(source, title, url, duration, requester)
+                    if info is None:
+                        raise commands.CommandError("Не удалось найти трек. Пожалуйста, проверьте ссылку или поисковый запрос.")
+                    
+                    if 'entries' in info:
+                        # Берем первый результат из плейлиста
+                        if len(info['entries']) == 0:
+                            raise commands.CommandError("Плейлист пуст или недоступен.")
+                        info = info['entries'][0]
+                    
+                    title = info.get('title', 'Неизвестное название')
+                    url = info.get('webpage_url', search)
+                    source = info.get('url')
+                    
+                    if not source:
+                        raise commands.CommandError("Не удалось получить источник аудио.")
+                    
+                    # Форматируем длительность в минутах:секундах
+                    duration_seconds = info.get('duration', 0)
+                    minutes, seconds = divmod(duration_seconds, 60)
+                    duration = f"{minutes}:{seconds:02d}"
+                    
+                    return cls(source, title, url, duration, requester)
+                except yt_dlp.utils.DownloadError as e:
+                    if "Private video" in str(e):
+                        raise commands.CommandError("Это приватное видео, доступ к нему ограничен.")
+                    elif "This video is not available" in str(e):
+                        raise commands.CommandError("Видео недоступно.")
+                    elif "Sign in" in str(e):
+                        raise commands.CommandError("Это видео требует авторизации на YouTube.")
+                    else:
+                        raise commands.CommandError(f"Ошибка при загрузке информации о видео: {str(e)}")
         except Exception as e:
+            if isinstance(e, commands.CommandError):
+                raise e
+            print(f"Ошибка создания трека: {e}")
             raise commands.CommandError(f"Ошибка при обработке трека: {str(e)}")
 
 class MusicPlayer:
@@ -168,7 +189,7 @@ class MusicControlView(disnake.ui.View):
         self.cog = cog
     
     @disnake.ui.button(emoji="⏯️", style=disnake.ButtonStyle.primary, custom_id="music:playpause")
-    async def playpause_button(self, button: disnake.ui.Button, interaction: disnake.Interaction):
+    async def playpause_button(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
         await interaction.response.defer(ephemeral=True)
         
         player = self.cog.get_player(interaction.guild)
@@ -181,17 +202,17 @@ class MusicControlView(disnake.ui.View):
             await self.cog.pause_command(interaction)
     
     @disnake.ui.button(emoji="⏭️", style=disnake.ButtonStyle.primary, custom_id="music:skip")
-    async def skip_button(self, button: disnake.ui.Button, interaction: disnake.Interaction):
+    async def skip_button(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
         await interaction.response.defer(ephemeral=True)
         await self.cog.skip_command(interaction)
     
     @disnake.ui.button(emoji="⏹️", style=disnake.ButtonStyle.danger, custom_id="music:stop")
-    async def stop_button(self, button: disnake.ui.Button, interaction: disnake.Interaction):
+    async def stop_button(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
         await interaction.response.defer(ephemeral=True)
         await self.cog.stop_command(interaction)
     
     @disnake.ui.button(emoji="🔁", style=disnake.ButtonStyle.secondary, custom_id="music:loop")
-    async def loop_button(self, button: disnake.ui.Button, interaction: disnake.Interaction):
+    async def loop_button(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
         await interaction.response.defer(ephemeral=True)
         
         player = self.cog.get_player(interaction.guild)
@@ -203,7 +224,7 @@ class MusicControlView(disnake.ui.View):
         await player.update_control_panel()
     
     @disnake.ui.button(emoji="🔀", style=disnake.ButtonStyle.secondary, custom_id="music:shuffle")
-    async def shuffle_button(self, button: disnake.ui.Button, interaction: disnake.Interaction):
+    async def shuffle_button(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
         await interaction.response.defer(ephemeral=True)
         
         player = self.cog.get_player(interaction.guild)
@@ -236,7 +257,7 @@ class MusicCog(commands.Cog):
             self.players[guild.id] = MusicPlayer(self.bot, guild)
         return self.players[guild.id]
     
-    async def ensure_voice(self, interaction: disnake.Interaction):
+    async def ensure_voice(self, interaction):
         """Проверяет, что бот подключен к голосовому каналу и пользователь находится в том же канале"""
         player = self.get_player(interaction.guild)
         
@@ -251,7 +272,7 @@ class MusicCog(commands.Cog):
         return player
     
     @commands.slash_command(name="play", description="Воспроизводит трек с YouTube")
-    async def play_command(self, interaction: disnake.Interaction, query: str):
+    async def play_command(self, interaction: disnake.ApplicationCommandInteraction, query: str):
         await interaction.response.defer()
         
         try:
@@ -264,7 +285,7 @@ class MusicCog(commands.Cog):
             await interaction.followup.send(f"Добавлено в очередь: **{song.title}**")
             
             # Если ничего не воспроизводится, начинаем воспроизведение
-            if not player.voice_client.is_playing() and not player.voice_client.is_paused():
+            if player.voice_client and not player.voice_client.is_playing() and not player.voice_client.is_paused():
                 player.next()
             
             # Обновляем панель управления, если она существует
@@ -278,89 +299,135 @@ class MusicCog(commands.Cog):
             await interaction.followup.send("Произошла ошибка при обработке вашего запроса.")
     
     @commands.slash_command(name="pause", description="Ставит текущий трек на паузу")
-    async def pause_command(self, interaction: disnake.Interaction):
+    async def pause_command(self, interaction):
         try:
             player = await self.ensure_voice(interaction)
             
-            if not player.voice_client.is_playing():
-                return await interaction.response.send_message("Сейчас ничего не воспроизводится!", ephemeral=True)
+            if not player.voice_client or not player.voice_client.is_playing():
+                if isinstance(interaction, disnake.ApplicationCommandInteraction):
+                    return await interaction.response.send_message("Сейчас ничего не воспроизводится!", ephemeral=True)
+                else:
+                    return await interaction.followup.send("Сейчас ничего не воспроизводится!", ephemeral=True)
             
             if player.voice_client.is_paused():
-                return await interaction.response.send_message("Музыка уже на паузе!", ephemeral=True)
+                if isinstance(interaction, disnake.ApplicationCommandInteraction):
+                    return await interaction.response.send_message("Музыка уже на паузе!", ephemeral=True)
+                else:
+                    return await interaction.followup.send("Музыка уже на паузе!", ephemeral=True)
             
             player.voice_client.pause()
-            await interaction.response.send_message("Воспроизведение приостановлено ⏸️", ephemeral=True)
+            
+            if isinstance(interaction, disnake.ApplicationCommandInteraction):
+                await interaction.response.send_message("Воспроизведение приостановлено ⏸️", ephemeral=True)
+            else:
+                await interaction.followup.send("Воспроизведение приостановлено ⏸️", ephemeral=True)
             
             # Обновляем панель управления
             await player.update_control_panel()
             
         except commands.CommandError as e:
-            await interaction.response.send_message(f"Ошибка: {str(e)}", ephemeral=True)
+            if isinstance(interaction, disnake.ApplicationCommandInteraction):
+                await interaction.response.send_message(f"Ошибка: {str(e)}", ephemeral=True)
+            else:
+                await interaction.followup.send(f"Ошибка: {str(e)}", ephemeral=True)
     
     @commands.slash_command(name="resume", description="Возобновляет воспроизведение текущего трека")
-    async def resume_command(self, interaction: disnake.Interaction):
+    async def resume_command(self, interaction):
         try:
             player = await self.ensure_voice(interaction)
             
-            if not player.voice_client.is_paused():
-                return await interaction.response.send_message("Музыка не на паузе!", ephemeral=True)
+            if not player.voice_client or not player.voice_client.is_paused():
+                if isinstance(interaction, disnake.ApplicationCommandInteraction):
+                    return await interaction.response.send_message("Музыка не на паузе!", ephemeral=True)
+                else:
+                    return await interaction.followup.send("Музыка не на паузе!", ephemeral=True)
             
             player.voice_client.resume()
-            await interaction.response.send_message("Воспроизведение возобновлено ▶️", ephemeral=True)
+            
+            if isinstance(interaction, disnake.ApplicationCommandInteraction):
+                await interaction.response.send_message("Воспроизведение возобновлено ▶️", ephemeral=True)
+            else:
+                await interaction.followup.send("Воспроизведение возобновлено ▶️", ephemeral=True)
             
             # Обновляем панель управления
             await player.update_control_panel()
             
         except commands.CommandError as e:
-            await interaction.response.send_message(f"Ошибка: {str(e)}", ephemeral=True)
+            if isinstance(interaction, disnake.ApplicationCommandInteraction):
+                await interaction.response.send_message(f"Ошибка: {str(e)}", ephemeral=True)
+            else:
+                await interaction.followup.send(f"Ошибка: {str(e)}", ephemeral=True)
     
     @commands.slash_command(name="skip", description="Пропускает текущий трек")
-    async def skip_command(self, interaction: disnake.Interaction):
+    async def skip_command(self, interaction):
         try:
             player = await self.ensure_voice(interaction)
             
-            if not player.voice_client.is_playing() and not player.voice_client.is_paused():
-                return await interaction.response.send_message("Сейчас ничего не воспроизводится!", ephemeral=True)
+            if not player.voice_client or (not player.voice_client.is_playing() and not player.voice_client.is_paused()):
+                if isinstance(interaction, disnake.ApplicationCommandInteraction):
+                    return await interaction.response.send_message("Сейчас ничего не воспроизводится!", ephemeral=True)
+                else:
+                    return await interaction.followup.send("Сейчас ничего не воспроизводится!", ephemeral=True)
             
             player.voice_client.stop()
-            await interaction.response.send_message("Трек пропущен ⏭️", ephemeral=True)
+            
+            if isinstance(interaction, disnake.ApplicationCommandInteraction):
+                await interaction.response.send_message("Трек пропущен ⏭️", ephemeral=True)
+            else:
+                await interaction.followup.send("Трек пропущен ⏭️", ephemeral=True)
             
         except commands.CommandError as e:
-            await interaction.response.send_message(f"Ошибка: {str(e)}", ephemeral=True)
+            if isinstance(interaction, disnake.ApplicationCommandInteraction):
+                await interaction.response.send_message(f"Ошибка: {str(e)}", ephemeral=True)
+            else:
+                await interaction.followup.send(f"Ошибка: {str(e)}", ephemeral=True)
     
     @commands.slash_command(name="stop", description="Останавливает воспроизведение и очищает очередь")
-    async def stop_command(self, interaction: disnake.Interaction):
+    async def stop_command(self, interaction):
         try:
             player = await self.ensure_voice(interaction)
             
             if player.queue:
                 player.queue.clear()
             
-            if player.voice_client.is_playing() or player.voice_client.is_paused():
+            if player.voice_client and (player.voice_client.is_playing() or player.voice_client.is_paused()):
                 player.voice_client.stop()
                 player.current = None
                 
-            await interaction.response.send_message("Воспроизведение остановлено и очередь очищена ⏹️", ephemeral=True)
+            if isinstance(interaction, disnake.ApplicationCommandInteraction):
+                await interaction.response.send_message("Воспроизведение остановлено и очередь очищена ⏹️", ephemeral=True)
+            else:
+                await interaction.followup.send("Воспроизведение остановлено и очередь очищена ⏹️", ephemeral=True)
             
             # Обновляем панель управления
             await player.update_control_panel()
             
         except commands.CommandError as e:
-            await interaction.response.send_message(f"Ошибка: {str(e)}", ephemeral=True)
+            if isinstance(interaction, disnake.ApplicationCommandInteraction):
+                await interaction.response.send_message(f"Ошибка: {str(e)}", ephemeral=True)
+            else:
+                await interaction.followup.send(f"Ошибка: {str(e)}", ephemeral=True)
     
     @commands.slash_command(name="queue", description="Показывает текущую очередь треков")
-    async def queue_command(self, interaction: disnake.Interaction):
+    async def queue_command(self, interaction):
         player = self.get_player(interaction.guild)
         
         if not player.current and not player.queue:
-            return await interaction.response.send_message("Очередь пуста!", ephemeral=True)
+            if isinstance(interaction, disnake.ApplicationCommandInteraction):
+                return await interaction.response.send_message("Очередь пуста!", ephemeral=True)
+            else:
+                return await interaction.followup.send("Очередь пуста!", ephemeral=True)
         
         embed = player.create_queue_embed()
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        
+        if isinstance(interaction, disnake.ApplicationCommandInteraction):
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+        else:
+            await interaction.followup.send(embed=embed, ephemeral=True)
     
     @commands.slash_command(name="setup_music_panel", description="Создает панель управления музыкой")
     @commands.has_permissions(administrator=True)
-    async def setup_panel_command(self, interaction: disnake.Interaction, channel: disnake.TextChannel = None):
+    async def setup_panel_command(self, interaction: disnake.ApplicationCommandInteraction, channel: disnake.TextChannel = None):
         target_channel = channel or interaction.channel
         player = self.get_player(interaction.guild)
         
