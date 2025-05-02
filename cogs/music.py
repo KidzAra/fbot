@@ -196,20 +196,67 @@ class MusicControlView(disnake.ui.View):
         if not player or not player.voice_client:
             return await interaction.followup.send("Бот не подключен к голосовому каналу!", ephemeral=True)
         
-        if player.voice_client.is_paused():
-            await self.cog.resume_command(interaction)
-        else:
-            await self.cog.pause_command(interaction)
+        try:
+            # Проверка на нахождение в одном канале
+            if not interaction.author.voice or interaction.author.voice.channel != player.voice_client.channel:
+                return await interaction.followup.send("Вы должны находиться в том же голосовом канале, что и бот!", ephemeral=True)
+            
+            if player.voice_client.is_paused():
+                player.voice_client.resume()
+                await interaction.followup.send("Воспроизведение возобновлено ▶️", ephemeral=True)
+            else:
+                player.voice_client.pause()
+                await interaction.followup.send("Воспроизведение приостановлено ⏸️", ephemeral=True)
+                
+            await player.update_control_panel()
+        except Exception as e:
+            await interaction.followup.send(f"Ошибка: {str(e)}", ephemeral=True)
     
     @disnake.ui.button(emoji="⏭️", style=disnake.ButtonStyle.primary, custom_id="music:skip")
     async def skip_button(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
         await interaction.response.defer(ephemeral=True)
-        await self.cog.skip_command(interaction)
+        
+        player = self.cog.get_player(interaction.guild)
+        if not player or not player.voice_client:
+            return await interaction.followup.send("Бот не подключен к голосовому каналу!", ephemeral=True)
+        
+        try:
+            # Проверка на нахождение в одном канале
+            if not interaction.author.voice or interaction.author.voice.channel != player.voice_client.channel:
+                return await interaction.followup.send("Вы должны находиться в том же голосовом канале, что и бот!", ephemeral=True)
+            
+            if not player.voice_client.is_playing() and not player.voice_client.is_paused():
+                return await interaction.followup.send("Сейчас ничего не воспроизводится!", ephemeral=True)
+            
+            player.voice_client.stop()
+            await interaction.followup.send("Трек пропущен ⏭️", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"Ошибка: {str(e)}", ephemeral=True)
     
     @disnake.ui.button(emoji="⏹️", style=disnake.ButtonStyle.danger, custom_id="music:stop")
     async def stop_button(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
         await interaction.response.defer(ephemeral=True)
-        await self.cog.stop_command(interaction)
+        
+        player = self.cog.get_player(interaction.guild)
+        if not player or not player.voice_client:
+            return await interaction.followup.send("Бот не подключен к голосовому каналу!", ephemeral=True)
+        
+        try:
+            # Проверка на нахождение в одном канале
+            if not interaction.author.voice or interaction.author.voice.channel != player.voice_client.channel:
+                return await interaction.followup.send("Вы должны находиться в том же голосовом канале, что и бот!", ephemeral=True)
+            
+            if player.queue:
+                player.queue.clear()
+            
+            if player.voice_client.is_playing() or player.voice_client.is_paused():
+                player.voice_client.stop()
+                player.current = None
+                
+            await interaction.followup.send("Воспроизведение остановлено и очередь очищена ⏹️", ephemeral=True)
+            await player.update_control_panel()
+        except Exception as e:
+            await interaction.followup.send(f"Ошибка: {str(e)}", ephemeral=True)
     
     @disnake.ui.button(emoji="🔁", style=disnake.ButtonStyle.secondary, custom_id="music:loop")
     async def loop_button(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
@@ -219,9 +266,16 @@ class MusicControlView(disnake.ui.View):
         if not player or not player.voice_client:
             return await interaction.followup.send("Бот не подключен к голосовому каналу!", ephemeral=True)
         
-        player.loop = not player.loop
-        await interaction.followup.send(f"Режим повтора {'включен' if player.loop else 'выключен'}", ephemeral=True)
-        await player.update_control_panel()
+        try:
+            # Проверка на нахождение в одном канале
+            if not interaction.author.voice or interaction.author.voice.channel != player.voice_client.channel:
+                return await interaction.followup.send("Вы должны находиться в том же голосовом канале, что и бот!", ephemeral=True)
+            
+            player.loop = not player.loop
+            await interaction.followup.send(f"Режим повтора {'включен' if player.loop else 'выключен'}", ephemeral=True)
+            await player.update_control_panel()
+        except Exception as e:
+            await interaction.followup.send(f"Ошибка: {str(e)}", ephemeral=True)
     
     @disnake.ui.button(emoji="🔀", style=disnake.ButtonStyle.secondary, custom_id="music:shuffle")
     async def shuffle_button(self, button: disnake.ui.Button, interaction: disnake.MessageInteraction):
@@ -231,26 +285,38 @@ class MusicControlView(disnake.ui.View):
         if not player or not player.voice_client:
             return await interaction.followup.send("Бот не подключен к голосовому каналу!", ephemeral=True)
         
-        if not player.queue:
-            return await interaction.followup.send("В очереди нет треков для перемешивания!", ephemeral=True)
-        
-        queue_list = list(player.queue)
-        random.shuffle(queue_list)
-        player.queue = deque(queue_list)
-        
-        await interaction.followup.send("Очередь перемешана!", ephemeral=True)
-        await player.update_control_panel()
+        try:
+            # Проверка на нахождение в одном канале
+            if not interaction.author.voice or interaction.author.voice.channel != player.voice_client.channel:
+                return await interaction.followup.send("Вы должны находиться в том же голосовом канале, что и бот!", ephemeral=True)
+            
+            if not player.queue:
+                return await interaction.followup.send("В очереди нет треков для перемешивания!", ephemeral=True)
+            
+            queue_list = list(player.queue)
+            random.shuffle(queue_list)
+            player.queue = deque(queue_list)
+            
+            await interaction.followup.send("Очередь перемешана!", ephemeral=True)
+            await player.update_control_panel()
+        except Exception as e:
+            await interaction.followup.send(f"Ошибка: {str(e)}", ephemeral=True)
 
 class MusicCog(commands.Cog):
     """Музыкальные команды для Discord бота"""
     def __init__(self, bot):
         self.bot = bot
         self.players = {}
-        self.control_view = MusicControlView(self)
+        self.control_view = None  # Будет инициализирован в on_ready
         
-        # Регистрируем постоянное представление
-        bot.add_view(self.control_view)
-    
+    @commands.Cog.listener()
+    async def on_ready(self):
+        """Инициализация компонентов, требующих event loop"""
+        # Инициализируем view и регистрируем его
+        self.control_view = MusicControlView(self)
+        self.bot.add_view(self.control_view)
+        print("Музыкальный модуль загружен и готов к использованию.")
+
     def get_player(self, guild):
         """Получает или создает MusicPlayer для сервера"""
         if guild.id not in self.players:
@@ -428,6 +494,10 @@ class MusicCog(commands.Cog):
     @commands.slash_command(name="setup_music_panel", description="Создает панель управления музыкой")
     @commands.has_permissions(administrator=True)
     async def setup_panel_command(self, interaction: disnake.ApplicationCommandInteraction, channel: disnake.TextChannel = None):
+        if not self.control_view:
+            self.control_view = MusicControlView(self)
+            self.bot.add_view(self.control_view)
+            
         target_channel = channel or interaction.channel
         player = self.get_player(interaction.guild)
         
