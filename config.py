@@ -1,5 +1,5 @@
-TOKEN = ''
-GUILD_ID = 
+TOKEN = ''  # Вставьте сюда токен вашего бота из Discord Developer Portal
+GUILD_ID = 1341271550279684128
 
 ADMIN_LOG_CHANNEL_ID = 
 SUPPORT_LOG_CHANNEL_ID = 

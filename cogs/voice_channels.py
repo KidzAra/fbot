@@ -575,6 +575,31 @@ class VoiceChannelCog(commands.Cog):
         # Словарь для хранения модераторов каналов: {channel_id: set(moderator_ids)}
         self.channel_moderators = {}
 
+    @commands.slash_command(
+        name="test1",
+        description="Устанавливает статус канала с эмодзи битрейта"
+    )
+    async def test1(self, inter: disnake.ApplicationCommandInteraction):
+        # Проверяем, находится ли пользователь в голосовом канале
+        if not inter.author.voice:
+            await inter.response.send_message("Вы должны находиться в голосовом канале, чтобы использовать эту команду.", ephemeral=True)
+            return
+
+        channel = inter.author.voice.channel
+        
+        # Проверяем права пользователя
+        if not self.is_channel_owner(channel.id, inter.author.id) and not self.is_channel_moderator(channel.id, inter.author.id):
+            await inter.response.send_message("У вас нет прав для изменения статуса этого канала.", ephemeral=True)
+            return
+
+        try:
+            # Устанавливаем статус канала с эмодзи
+            await inter.guild.edit_voice_state(channel=channel, status="<:bitrate:1357828282979979273>")
+            await inter.response.send_message("Статус канала успешно обновлен!", ephemeral=True)
+        except Exception as e:
+            print(f"Ошибка при установке статуса канала: {e}")
+            await inter.response.send_message("Произошла ошибка при установке статуса канала.", ephemeral=True)
+
     async def remove_mute(self, member):
         try:
             await member.edit(mute=False)
